@@ -440,7 +440,8 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
     if (@available(iOS 11.0, *)) {
         return self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     }
-    return NO;
+    
+    return [UIView userInterfaceLayoutDirectionForSemanticContentAttribute:self.semanticContentAttribute];
 }
 
 @end
@@ -601,7 +602,9 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
             CGRect frame = CGRectOffset(self.itemFrames[i].CGRectValue, self.offset.x, self.offset.y);
             if (CGRectIntersectsRect(frame, rect)) {
                 visibleItemsFound = YES;
-                [intersectingAttributes addObject:[self layoutAttributesForItemAtIndex:i]];
+                UICollectionViewLayoutAttributes *item = [self layoutAttributesForItemAtIndex:i];
+                
+                [intersectingAttributes addObject:self.shouldFlipLayoutDirection ? [self flipItem:item]: item];
             }
 
             // Optimization: If we have seen previously intersecting items but the current one
@@ -611,6 +614,23 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
         }
     }
     return intersectingAttributes;
+}
+
+- (BOOL)shouldFlipLayoutDirection
+{
+    return [UIView userInterfaceLayoutDirectionForSemanticContentAttribute:self.layout.collectionView.semanticContentAttribute];
+}
+
+- (UICollectionViewLayoutAttributes *)flipItem:(UICollectionViewLayoutAttributes *)itemAttribute {
+    if (@available(iOS 11.0, *)) {
+        return itemAttribute;
+    }
+    
+    CGRect frame = itemAttribute.frame;
+    CGFloat newXOrigin = self.collectionViewWidth - CGRectGetWidth(frame) - CGRectGetMinX(frame);
+    frame.origin.x = newXOrigin;
+    itemAttribute.frame = frame;
+    return itemAttribute;
 }
 
 @end
