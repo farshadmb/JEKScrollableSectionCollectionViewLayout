@@ -1,8 +1,8 @@
 # coding: utf-8
 Pod::Spec.new do |spec|
   spec.name         = 'JEKScrollableSectionCollectionViewLayout'
-  spec.version      = '1.2.1'
   spec.platform     = :ios, '9.0'
+  spec.version      = '1.3.0'
   spec.homepage     = 'https://github.com/accatyyc/JEKScrollableSectionCollectionViewLayout'
   spec.authors      = { 'Joel Ekström' => 'accatyyc@gmail.com' }
   spec.summary      = 'A UICollectionView flow layout with individually scrollable sections'

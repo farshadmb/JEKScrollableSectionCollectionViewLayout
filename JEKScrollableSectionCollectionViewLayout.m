@@ -29,6 +29,7 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
 @property (nonatomic, assign) CGSize headerSize;
 @property (nonatomic, assign) CGSize footerSize;
 @property (nonatomic, assign) BOOL needsLayout;
+@property (nonatomic, assign) BOOL shouldUseFlowLayout;
 - (void)prepareLayout;
 
 @property (nonatomic, readonly) CGRect frame; // Relative frame of the section in the collection view
@@ -45,11 +46,11 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
 
 @interface JEKScrollableSectionLayoutInvalidationContext : UICollectionViewLayoutInvalidationContext
 @property (nonatomic, strong) JEKScrollableSectionInfo *invalidatedSection;
+@property (nonatomic, assign) BOOL invalidateCollectionViewWidth;
 @end
 
 @interface JEKScrollableSectionCollectionViewLayout() <UIScrollViewDelegate>
 @property (nonatomic, assign) CGSize contentSize;
-@property (nonatomic, assign) BOOL isAdjustingBoundsToInvalidateHorizontalSection;
 @property (nonatomic, strong) NSArray<JEKScrollableSectionInfo *> *sections;
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> *offsetCache;
 @property (nonatomic, weak) id<UICollectionViewDelegateFlowLayout> delegate;
@@ -134,6 +135,7 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
             section.headerSize = [self headerSizeForSection:index];
             section.footerSize = [self footerSizeForSection:index];
             section.numberOfItems = [self.collectionView numberOfItemsInSection:index];
+            section.shouldUseFlowLayout = [self shouldUseFlowLayoutInSection: index];
             NSMutableArray<NSValue *> *itemSizes = [NSMutableArray new];
             for (NSInteger item = 0; item < section.numberOfItems; ++item) {
                 CGSize itemSize = [self itemSizeForIndexPath:[NSIndexPath indexPathForItem:item inSection:section.index]];
@@ -155,6 +157,13 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
     if (context.invalidateEverything) {
         self.sections = nil;
         return;
+    }
+
+    if (context.invalidateCollectionViewWidth) {
+        for (JEKScrollableSectionInfo *section in self.sections) {
+            section.needsLayout = YES;
+            section.collectionViewWidth = self.collectionView.frame.size.width;
+        }
     }
 
     if (context.invalidateDataSourceCounts) {
@@ -229,48 +238,31 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
     return visibleAttributes;
 }
 
-// NOTE: UICollectionView will only ever dequeue new cells if its bounds
-// change, regardless if all layout attributes are updated within invalidateLayoutWithContext.
-// Therefore a hack is required to make this layout work. After updating the frames in
-// invalidateLayoutWithContext: above, slightly change the bounds to make sure that the
-// collectionView queries for cells that may have entered the visible area.
-- (void)adjustBoundsToInvalidateVisibleItemIndexPaths
-{
-    _isAdjustingBoundsToInvalidateHorizontalSection = YES;
-    CGRect bounds = self.collectionView.bounds;
-    bounds.origin.x = bounds.origin.x == 0.0 ? -0.1 : 0.0;
-    [self.collectionView setBounds:bounds];
-}
-
 - (BOOL)shouldInvalidateLayoutForBoundsChange:(CGRect)newBounds
 {
-    if (_isAdjustingBoundsToInvalidateHorizontalSection) {
-        _isAdjustingBoundsToInvalidateHorizontalSection = NO;
-        return YES;
-    } else if (newBounds.size.width != self.contentSize.width) {
-        return YES;
-    }
-    return NO;
+    return newBounds.size.width != self.contentSize.width;
 }
 
 - (UICollectionViewLayoutInvalidationContext *)invalidationContextForBoundsChange:(CGRect)newBounds
 {
-    UICollectionViewLayoutInvalidationContext *context = [super invalidationContextForBoundsChange:newBounds];
-    if (newBounds.size.width != self.collectionViewContentSize.width) {
-        for (JEKScrollableSectionInfo *section in self.sections) {
-            NSIndexPath *sectionIndexPath = [NSIndexPath indexPathWithIndex:[self.sections indexOfObject:section]];
-            [context invalidateDecorationElementsOfKind:JEKScrollableCollectionViewLayoutScrollViewKind atIndexPaths:@[sectionIndexPath]];
-            [context invalidateSupplementaryElementsOfKind:UICollectionElementKindSectionHeader atIndexPaths:@[sectionIndexPath]];
-            [context invalidateSupplementaryElementsOfKind:UICollectionElementKindSectionFooter atIndexPaths:@[sectionIndexPath]];
-        }
-    }
+    JEKScrollableSectionLayoutInvalidationContext *context = (JEKScrollableSectionLayoutInvalidationContext *)[super invalidationContextForBoundsChange:newBounds];
+    context.invalidateCollectionViewWidth = YES;
     return context;
 }
 
-#pragma mark - UIScrollViewDelegate
 #define DELEGATE_RESPONDS_TO_SELECTOR(SEL) ([self.collectionView.delegate conformsToProtocol:@protocol(JEKCollectionViewDelegateScrollableSectionLayout)] &&\
                                             [self.collectionView.delegate respondsToSelector:SEL])
 #define DELEGATE (id<JEKCollectionViewDelegateScrollableSectionLayout>)self.collectionView.delegate
+
+- (BOOL)shouldUseFlowLayoutInSection:(NSInteger)section
+{
+    if (DELEGATE_RESPONDS_TO_SELECTOR(@selector(collectionView:layout:shouldUseFlowLayoutInSection:))) {
+        return [DELEGATE collectionView:self.collectionView layout:self shouldUseFlowLayoutInSection:section];
+    }
+    return NO;
+}
+
+#pragma mark - UIScrollViewDelegate
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView
 {
@@ -280,7 +272,6 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
     JEKScrollableSectionLayoutInvalidationContext *invalidationContext = [JEKScrollableSectionLayoutInvalidationContext new];
     invalidationContext.invalidatedSection = self.sections[section];
     [self invalidateLayoutWithContext:invalidationContext];
-    [self adjustBoundsToInvalidateVisibleItemIndexPaths];
 
     if (DELEGATE_RESPONDS_TO_SELECTOR(@selector(collectionView:layout:section:didScrollToOffset:))) {
         [DELEGATE collectionView:self.collectionView layout:self section:section didScrollToOffset:scrollView.contentOffset.x];
@@ -489,14 +480,25 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
     bounds.size.width = self.insets.left;
     bounds.size.height = self.headerSize.height;
     NSMutableArray<NSValue *> *itemFrames = [NSMutableArray new];
+    CGRect previousItemFrame = CGRectZero;
     for (NSUInteger item = 0; item < self.numberOfItems; ++item) {
         CGSize size = [self.itemSizes[item] CGSizeValue];
         CGRect frame;
         frame.size = size;
-        frame.origin.x = CGRectGetMaxX(bounds) + (item == 0 ? 0.0 : self.interItemSpacing);
-        frame.origin.y = self.insets.top + self.headerSize.height;
+
+        CGFloat largestXOnExistingRow = CGRectGetMaxX(previousItemFrame) + (item == 0 ? 0.0 : self.interItemSpacing);
+        if (self.shouldUseFlowLayout && (largestXOnExistingRow + frame.size.width) > (self.collectionViewWidth - self.insets.right)) {
+            // Flowlayout and item won't fit - place it on a new row below
+            frame.origin.x = self.insets.left;
+            frame.origin.y = CGRectGetMaxY(bounds) + (item == 0 ? 0.0 : self.interItemSpacing);
+        } else {
+            // Not flow layout or it actually fits in the current flow layouted row
+            frame.origin.x = (item == 0 ? self.insets.left : CGRectGetMaxX(previousItemFrame) + self.interItemSpacing);
+            frame.origin.y = (item == 0 ? self.insets.top + self.headerSize.height : previousItemFrame.origin.y);
+        }
         bounds = CGRectUnion(bounds, frame);
         [itemFrames addObject:[NSValue valueWithCGRect:frame]];
+        previousItemFrame = frame;
     }
     bounds.size.width += self.insets.right;
     bounds.size.height += self.footerSize.height + self.insets.bottom;
