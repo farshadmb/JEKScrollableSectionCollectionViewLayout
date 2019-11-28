@@ -100,7 +100,7 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
 
 - (BOOL)flipsHorizontallyInOppositeLayoutDirection
 {
-    return YES;
+    return false;
 }
 
 - (void)prepareLayout
@@ -620,13 +620,14 @@ NSString * const JEKCollectionElementKindSectionBackground = @"JEKCollectionElem
 
 - (BOOL)shouldFlipLayoutDirection
 {
+    if (@available(iOS 11.0, *)) {
+        return self.layout.collectionView.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    }
+    
     return [UIView userInterfaceLayoutDirectionForSemanticContentAttribute:self.layout.collectionView.semanticContentAttribute];
 }
 
 - (UICollectionViewLayoutAttributes *)flipItem:(UICollectionViewLayoutAttributes *)itemAttribute {
-    if (@available(iOS 11.0, *)) {
-        return itemAttribute;
-    }
     
     CGRect frame = itemAttribute.frame;
     CGFloat newXOrigin = self.collectionViewWidth - CGRectGetWidth(frame) - CGRectGetMinX(frame);
